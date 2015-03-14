@@ -1237,18 +1237,37 @@ static int remove_file_array(char **remove_names, char **exclude_names)
 	return (remove_flag == 0);
 }
 
-static void run_package_script_or_die(const char *package_name, const char *script_type)
+// sky: allow preinst install & postinst configure
+//  + operation
+static int run_package_scriptop_or_die(const char *package_name, const char *script_type,
+            const char *operation, bool die)
 {
 	char *script_path;
 	int result;
+    char cmd[256];
 
 	script_path = xasprintf("/var/lib/dpkg/info/%s.%s", package_name, script_type);
 
 	/* If the file doesnt exist is isnt fatal */
-	result = access(script_path, F_OK) ? EXIT_SUCCESS : system(script_path);
+	if (access(script_path, F_OK)) 
+	    result = EXIT_SUCCESS;
+    else { 
+        if (operation == NULL)
+            result = system(script_path);
+        else {
+            snprintf(cmd, 256, "%s %s", script_path, operation);
+            result = system(cmd);
+        }
+    }
 	free(script_path);
-	if (result)
+	if (die && result)
 		bb_error_msg_and_die("%s failed, exit code %d", script_type, result);
+    return result;
+}
+
+static void run_package_script_or_die(const char *package_name, const char *script_type)
+{
+    run_package_scriptop_or_die(package_name, script_type, NULL, TRUE);
 }
 
 /*
@@ -1675,7 +1694,7 @@ static void unpack_package(deb_file_t *deb_file)
 	unpack_ar_archive(archive_handle);
 
 	/* Run the preinst prior to extracting */
-	run_package_script_or_die(package_name, "preinst");
+	run_package_scriptop_or_die(package_name, "preinst", "install", TRUE);
 
 	/* Don't overwrite existing config files */
 	if (!(option_mask32 & OPT_force_confnew))
@@ -1715,8 +1734,11 @@ static void unpack_package(deb_file_t *deb_file)
 	free(list_filename);
 }
 
+// sky: if postinst configure fails, dun die, set status half-configured
+//   status in dpkg -l is incorrect
 static void configure_package(deb_file_t *deb_file)
 {
+	int result;
 	const char *package_name = name_hashtable[package_hashtable[deb_file->package]->name];
 	const char *package_version = name_hashtable[package_hashtable[deb_file->package]->version];
 	const int status_num = search_status_hashtable(package_name);
@@ -1725,11 +1747,14 @@ static void configure_package(deb_file_t *deb_file)
 
 	/* Run the postinst script */
 	/* TODO: handle failure gracefully */
-	run_package_script_or_die(package_name, "postinst");
+	result = run_package_scriptop_or_die(package_name, "postinst", "configure", FALSE);
 
 	/* Change status to reflect success */
 	set_status(status_num, "install", 1);
-	set_status(status_num, "installed", 3);
+    if (result)
+	    set_status(status_num, "half-configured", 3);
+    else
+	    set_status(status_num, "installed", 3);
 }
 
 int dpkg_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;

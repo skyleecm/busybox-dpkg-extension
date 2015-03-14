@@ -39,6 +39,7 @@
 //usage:     "\n	-f	Display control field name starting with [argument]"
 //usage:     "\n	-x	Extract packages filesystem tree to directory"
 //usage:     "\n	-X	Verbose extract"
+//usage:     "\n	-R	Extract packages filesystem tree to directory and the control information files into a DEBIAN subdirectory"
 //usage:
 //usage:#define dpkg_deb_example_usage
 //usage:       "$ dpkg-deb -X ./busybox_0.48-1_i386.deb /tmp\n"
@@ -51,6 +52,9 @@
 #define DPKG_DEB_OPT_FIELD            4
 #define DPKG_DEB_OPT_EXTRACT          8
 #define DPKG_DEB_OPT_EXTRACT_VERBOSE 16
+// sky: add -R
+//   extracts control files into DEBIAN subdir
+#define DPKG_DEB_OPT_EXTRACT_RAW     32
 
 int dpkg_deb_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int dpkg_deb_main(int argc, char **argv)
@@ -89,8 +93,8 @@ int dpkg_deb_main(int argc, char **argv)
 	llist_add_to(&control_tar_llist, (char*)"control.tar.lzma");
 #endif
 
-	opt_complementary = "c--efXx:e--cfXx:f--ceXx:X--cefx:x--cefX";
-	opt = getopt32(argv, "cefXx");
+	opt_complementary = "c--efXxR:e--cfXxR:f--ceXxR:X--cefxR:x--cefXR:R--cefXx";
+	opt = getopt32(argv, "cefXxR");
 	argv += optind;
 	argc -= optind;
 
@@ -120,7 +124,7 @@ int dpkg_deb_main(int argc, char **argv)
 	if (opt & DPKG_DEB_OPT_EXTRACT) {
 		tar_archive->action_header = header_list;
 	}
-	if (opt & (DPKG_DEB_OPT_EXTRACT_VERBOSE | DPKG_DEB_OPT_EXTRACT)) {
+	if (opt & (DPKG_DEB_OPT_EXTRACT_VERBOSE | DPKG_DEB_OPT_EXTRACT | DPKG_DEB_OPT_EXTRACT_RAW)) {
 		tar_archive->action_data = data_extract_all;
 		need_args = 2;
 	}
@@ -143,6 +147,20 @@ int dpkg_deb_main(int argc, char **argv)
 
 	/* Do it */
 	unpack_ar_archive(ar_archive);
+
+    // extracts control files into DEBIAN subdir
+	if (opt & DPKG_DEB_OPT_EXTRACT_RAW) {
+		close(ar_archive->src_fd);
+        ar_archive = init_handle();
+        ar_archive->dpkg__sub_archive = tar_archive;
+        ar_archive->filter = filter_accept_list_reassign;
+		ar_archive->accept = control_tar_llist;
+	    tar_archive->src_fd = ar_archive->src_fd = xopen(argv[0], O_RDONLY);
+		extract_dir = "./DEBIAN";
+		mkdir(extract_dir, 0777);
+		xchdir(extract_dir);
+	    unpack_ar_archive(ar_archive);
+	}
 
 	/* Cleanup */
 	if (ENABLE_FEATURE_CLEAN_UP)

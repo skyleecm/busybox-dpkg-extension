@@ -1,0 +1,80 @@
+#!/bin/sh
+# sky: extend busybox dpkg - it is moved to /bin
+DLOG=/var/log/idpkg.log
+[ -f $DLOG ] && echo "dpkg $@" >> $DLOG
+INFO=/var/lib/dpkg/info
+STATUS=/var/lib/dpkg/status
+getstatus()
+{       
+    start=$(grep -n "^Package: $OPTARG$" $STATUS | cut -d ':' -f 1)
+    if [ -n "$start" ]; then
+        num=$(tail -n +$start $STATUS | grep -n -m 1 '^$' | cut -d ':' -f 1)
+        tail -n +$start $STATUS | head -n $num
+    fi
+    exit
+}
+
+while getopts ":i:lC:P:r:u:-:L:s:S:D:" opt; do
+    case $opt in
+      i|u|C|P|r) 
+        /bin/dpkg "$@"
+        exit
+        ;;
+      l)
+        /bin/dpkg "$@"
+        exit
+        ;;
+      \?)
+        echo "invalid option: -$OPTARG" 
+        exit 1
+        ;;
+      :)
+        echo "option: -$OPTARG requires argument" 
+        exit 1
+        ;;
+      -)
+        case $OPTARG in
+          force-depends|force-confnew|force-confold|unpack|purge|remove|configure|install|list)
+            ;;
+          status)
+            shift $((OPTIND-1))
+            OPTARG=$1
+            getstatus
+            ;;
+          *)
+            echo "invalid option: --$OPTARG" 
+            exit 1
+            ;;
+        esac
+        ;;
+      L)
+        if echo "$OPTARG" | grep -q ":" ; then
+            OPTARG=$(echo "$OPTARG" | cut -d ':' -f 1)
+        fi
+        if [ -f "$INFO/$OPTARG.list" ]; then
+            cat "$INFO/$OPTARG.list"
+        fi
+        exit 
+        ;;
+      s)
+        getstatus
+        ;;
+      S)
+        cd $INFO
+        grep $OPTARG *.list
+        cd - >/dev/null
+        exit 
+        ;;
+      D)
+        if [ $OPTARG = "0" ]; then
+            [ -f $DLOG ] && rm $DLOG
+        else
+            [ ! -f $DLOG ] && touch $DLOG
+            chgrp staff $DLOG
+            chmod 664 $DLOG
+        fi
+        exit 
+        ;;
+    esac
+done
+/bin/dpkg "$@"
